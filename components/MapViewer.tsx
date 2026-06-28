@@ -5,6 +5,7 @@ import 'leaflet/dist/leaflet.css'
 import { supabase } from '@/lib/supabase'
 import * as exifr from 'exifr'
 
+
 console.log('SUPABASE URL:', process.env.NEXT_PUBLIC_SUPABASE_URL)
 console.log('SUPABASE KEY:', process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY)
 
@@ -18,6 +19,12 @@ export default function MapViewer() {
   const baseLayerRef = useRef<any>(null)
   const photoMarkerRef = useRef<any>(null)
   const [description, setDescription] = useState('')
+  const [searchText, setSearchText] = useState('')
+  const [searchResults, setSearchResults] = useState<any[]>([])
+  
+
+  const [activeLayer, setActiveLayer] =
+  useState('streets')
 
   const [selectedDistrict, setSelectedDistrict] =
     useState('')
@@ -26,55 +33,69 @@ export default function MapViewer() {
     string[]
   >([])
 
-  const [activeLayer, setActiveLayer] =
-    useState('streets')
-useEffect(() => {
-  ;(window as any).downloadPhoto = async (
-  id: number
-) => {
-  const { data: photo } = await supabase
-    .from('photo_surveys')
-    .select('*')
-    .eq('id', id)
-    .single()
+const searchLocation = async (value: string) => {
+  setSearchText(value)
 
-  if (!photo) {
-    alert('Photo not found')
+  if (value.length < 3) {
+    setSearchResults([])
     return
   }
 
-  // Download image
-  console.log("PHOTO:", photo)
-  console.log("PHOTO URL:", photo.photo_url)
-  const response = await fetch(
-    photo.photo_url
-  )
+  try {
+    const response = await fetch(
+  `https://api.geoapify.com/v1/geocode/autocomplete?text=${encodeURIComponent(
+    value
+  )}&limit=20&filter=countrycode:in&bias=proximity:78.4867,17.3850&apiKey=${process.env.NEXT_PUBLIC_GEOAPIFY_KEY}`
+)
 
-  console.log("RESPONSE STATUS:", response.status)
-console.log("RESPONSE OK:", response.ok)
+    const data = await response.json()
 
-if (!response.ok) {
-  alert(`Download failed. Status: ${response.status}`)
-  return
+   console.log(
+  "FIRST RESULT:",
+  data.features?.[0]
+)
+    setSearchResults(data.features || [])
+  } catch (error) {
+    console.error("Search Error:", error)
+  }
 }
 
-  const blob = await response.blob()
+useEffect(() => {
+  ;(window as any).downloadPhoto = async (
+    id: number
+  ) => {
+    const { data: photo } =
+      await supabase
+        .from('photo_surveys')
+        .select('*')
+        .eq('id', id)
+        .single()
 
-  const imageUrl =
-    window.URL.createObjectURL(blob)
+    if (!photo) {
+      alert('Photo not found')
+      return
+    }
 
-  const imageLink =
-    document.createElement('a')
+    const response = await fetch(
+      photo.photo_url
+    )
 
-  imageLink.href = imageUrl
+    const blob = await response.blob()
 
-  imageLink.download =
-    photo.file_name || 'photo.jpg'
+    const imageUrl =
+      window.URL.createObjectURL(blob)
 
-  imageLink.click()
+    const imageLink =
+      document.createElement('a')
 
-  // Metadata file
-  const details = `
+    imageLink.href = imageUrl
+
+    imageLink.download =
+      photo.file_name || 'photo.jpg'
+
+    imageLink.click()
+
+    const details = `
 Description: ${photo.description}
 
 Address: ${photo.address}
@@ -86,54 +107,50 @@ Longitude: ${photo.longitude}
 Uploaded By: ${photo.uploaded_by}
 
 Uploaded At: ${photo.uploaded_at}
-
-File Name: ${photo.file_name}
-
-File Size: ${photo.file_size} bytes
 `
 
-  const textBlob = new Blob(
-    [details],
-    { type: 'text/plain' }
-  )
-
-  const textUrl =
-    URL.createObjectURL(textBlob)
-
-  const textLink =
-    document.createElement('a')
-
-  textLink.href = textUrl
-
-  textLink.download =
-    'photo-details.txt'
-
-  textLink.click()
-}
-
-  ;(window as any).deletePhoto = async (
-    id: number
-  ) => {
-    const confirmDelete = confirm(
-      'Delete this photo?'
+    const detailsBlob = new Blob(
+      [details],
+      { type: 'text/plain' }
     )
 
-    if (!confirmDelete) return
+    const detailsUrl =
+      URL.createObjectURL(detailsBlob)
 
-    const { error } = await supabase
-      .from('photo_surveys')
-      .delete()
-      .eq('id', id)
+    const detailsLink =
+      document.createElement('a')
 
-    if (error) {
-      alert('Delete failed')
-      return
-    }
+    detailsLink.href = detailsUrl
 
-    alert('Photo deleted')
+    detailsLink.download =
+      'photo-details.txt'
 
-    location.reload()
+    detailsLink.click()
   }
+
+  ;(window as any).deletePhoto =
+    async (id: number) => {
+      const confirmDelete =
+        confirm(
+          'Delete this photo?'
+        )
+
+      if (!confirmDelete) return
+
+      const { error } =
+        await supabase
+          .from('photo_surveys')
+          .delete()
+          .eq('id', id)
+
+      if (error) {
+        alert('Delete failed')
+        return
+      }
+
+      alert('Photo deleted')
+      location.reload()
+    }
 }, [])
 
 const loadPhotoMarkers = async (
@@ -268,7 +285,84 @@ View Photos
 </button>
 
 </div>
+<div
+  style={{
+    position: 'absolute',
+    top: '70px',
+    right: '20px',
+    zIndex: 1000,
+    width: '350px',
+    background: '#fff',
+    borderRadius: '10px',
+    boxShadow:
+      '0 4px 12px rgba(0,0,0,0.2)',
+    overflow: 'hidden',
+  }}
+>
+  <input
+    type="text"
+    placeholder="Search location..."
+    value={searchText}
+    onChange={(e) =>
+      searchLocation(e.target.value)
+    }
+    style={{
+      width: '100%',
+      padding: '12px',
+      border: 'none',
+      outline: 'none',
+    }}
+  />
+</div>
+<p>
+  Results:
+  {searchResults.length}
+</p>
 `)
+{searchResults.length > 0 && (
+  <div
+    style={{
+      maxHeight: "250px",
+      overflowY: "auto",
+      background: "white",
+      borderTop: "1px solid #ddd",
+    }}
+  >
+    {searchResults.map(
+      (place: any, index: number) => (
+        <div
+          key={`search-${index}`}
+          onClick={() => {
+            const lat =
+              place.properties.lat
+
+            const lon =
+              place.properties.lon
+
+            mapInstance.current.setView(
+              [lat, lon],
+              16
+            )
+
+            setSearchText(
+              place.properties.formatted
+            )
+
+            setSearchResults([])
+          }}
+          style={{
+            padding: "10px",
+            cursor: "pointer",
+            borderBottom:
+              "1px solid #eee",
+          }}
+        >
+          {place.properties.formatted}
+        </div>
+      )
+    )}
+  </div>
+)}
     })
   }
   const handleImageUpload = async (
@@ -280,6 +374,12 @@ View Photos
 
     try {
  const gps = await exifr.gps(file)
+
+console.log(
+  'GPS DATA FULL:',
+  JSON.stringify(gps, null, 2)
+)
+console.log('FILE NAME:', file.name)
 
 let latlng = {
   lat: 0,
@@ -294,7 +394,10 @@ if (
     lat: gps.latitude,
     lng: gps.longitude,
   }
-
+ alert(
+  `Latitude: ${latlng.lat}
+Longitude: ${latlng.lng}`
+)
   console.log('Using GPS from photo')
 } else {
   console.log(
@@ -531,23 +634,25 @@ alert('Photo uploaded successfully')
         if (container._leaflet_id) {
           container._leaflet_id = undefined
         }
-
+        console.log('MAP REF:', mapRef.current)
+console.log('MAP CREATED')
         const map = L.map(container).setView(
           [17.385, 78.4867],
           7
         )
+         const osmLayer = L.tileLayer(
+  'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+  {
+    attribution:
+      '© OpenStreetMap contributors',
+  }
+)
+
+osmLayer.addTo(map)
+
+baseLayerRef.current = osmLayer
 
         mapInstance.current = map
-
-        // Default basemap
-        baseLayerRef.current = L.tileLayer(
-          'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-          {
-            attribution:
-              '© OpenStreetMap contributors',
-          }
-        ).addTo(map)
-      
 
         // Load Telangana JSON
         const response = await fetch(
@@ -661,6 +766,7 @@ alert('Photo uploaded successfully')
       }
 
       loadMap()
+     console.log('LOADMAP START')
 
       return () => {
         if (mapInstance.current) {
@@ -852,16 +958,15 @@ alert('Photo uploaded successfully')
               Select District
             </option>
 
-            {districts.map((district) => (
-              <option
-                key={district}
-                value={district}
-              >
-                {district}
-              </option>
-            ))}
-          </select>
-
+            {districts.map((district, index) => (
+  <option
+    key={`${district}-${index}`}
+    value={district}
+  >
+    {district}
+  </option>
+))}
+</select>
 
         </div>
 
@@ -927,8 +1032,81 @@ alert('Photo uploaded successfully')
             }}
           />
         </div>
+         {/* Search Dropdown */}
+        <div
+  style={{
+    position: 'absolute',
+    top: '10px',
+    right: '20px',
+    zIndex: 99999,
+    width: '350px',
+    background: 'white',
+    borderRadius: '10px',
+    boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+    overflow: 'hidden',
+    
+  }}
+>
+  <input
+    type="text"
+    placeholder="Search place or coordinates..."
+    value={searchText}
+    onChange={(e) =>
+      searchLocation(e.target.value)
+    }
+    style={{
+      width: '100%',
+      padding: '12px',
+      border: 'none',
+      outline: 'none',
+    }}
+  />
+ {searchResults.map(
+  (place: any, index: number) => (
+    <div
+      key={`search-${index}-${place.formatted || ''}`}
+    onClick={() => {
+  console.log('CLICKED PLACE:', place)
 
+  const lat =
+    place.properties?.lat ||
+    place.lat
 
+  const lon =
+    place.properties?.lon ||
+    place.lon
+    
+
+  if (
+    mapInstance.current &&
+    lat &&
+    lon
+  ) {
+    mapInstance.current.setView(
+      [Number(lat), Number(lon)],
+      16
+    )
+  }
+
+  setSearchResults([])
+}}
+      style={{
+        padding: '10px',
+        cursor: 'pointer',
+        borderTop: '1px solid #eee',
+      }}
+    >
+     {place.properties?.formatted}
+
+      <br />
+
+      <small>
+       {place.properties?.lat},
+       {place.properties?.lon}
+      </small>
+    </div>
+  ))}
+</div>
         {/* Map */}
         <div
           ref={mapRef}
